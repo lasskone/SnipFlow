@@ -5547,6 +5547,10 @@ async def post_to_socials(req: SocialPostRequest, request: Request):
 
     # Resolve the Upload-Post key + profile. For managed users the server key is
     # used and their own profile is forced (body api_key / user_id are ignored).
+    # This endpoint only publishes: generating, previewing and downloading clips
+    # never reach it (they need a Gemini key only), so a missing Upload-Post key
+    # here is a client error, not a reason to hand back clip info and look like a
+    # successful post. A caller who asked to publish must be told it could not.
     upload_key, forced_profile = await resolve_upload_post(request, req.api_key)
     if not upload_key:
         raise HTTPException(status_code=400, detail="Missing Upload-Post API key")

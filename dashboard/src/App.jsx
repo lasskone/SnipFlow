@@ -875,8 +875,9 @@ function App() {
   // `keysMissing` now means "self-host BYOK keys missing" — it never fires on hosted.
   // A self-hosted server running the moment picker on a local LLM
   // (LLM_BASE_URL) does not need a Gemini key for the core pipeline.
+  // Upload-Post key is now optional - only required for social posting, not for generation/preview
   const geminiOk = !!apiKey || !!localLlm;
-  const keysMissing = !billingEnabled && (!geminiOk || !uploadPostKey);
+  const keysMissing = !billingEnabled && (!geminiOk);
   const needsPlan = billingEnabled && !isManaged;   // hosted, signed-out or no active plan/trial
 
   // Fresh sign-up: Clip Generator tutorial (AuthContext set os_show_clip_tutorial
@@ -1513,11 +1514,9 @@ function App() {
               >
                 <AlertTriangle size={12} />
                 <span className="hidden md:inline">
-                  {!geminiOk && !uploadPostKey
+                  {!uploadPostKey
                     ? 'Gemini & Upload-Post keys missing'
-                    : !geminiOk
-                      ? 'Gemini API Key Missing'
-                      : 'Upload-Post API Key Missing'}
+                    : 'Gemini API Key Missing'}
                 </span>
                 <span className="md:hidden">keys missing</span>
               </button>
@@ -1533,11 +1532,9 @@ function App() {
               <div className="min-w-0">
                 <span className="font-medium text-ink">Required API keys missing.</span>{' '}
                 <span className="text-muted">
-                  {!geminiOk && !uploadPostKey
-                    ? 'Set your Gemini and Upload-Post API keys to use OpenShorts.'
-                    : !geminiOk
-                      ? 'Set your Gemini API key to use OpenShorts.'
-                      : 'Set your Upload-Post API key to use OpenShorts.'}
+                  {!uploadPostKey
+                    ? 'Set your Gemini API key to generate clips. Upload-Post is only needed to publish them.'
+                    : 'Set your Gemini API key to generate clips.'}
                 </span>
               </div>
             </div>
@@ -2355,11 +2352,9 @@ function App() {
         isOpen={showKeyModal}
         onClose={() => setShowKeyModal(false)}
         eyebrow="SETUP"
-        title={!geminiOk && !uploadPostKey
+        title={!uploadPostKey
           ? 'Required API Keys Missing'
-          : !geminiOk
-            ? 'Gemini API Key Required'
-            : 'Upload-Post API Key Required'}
+          : 'Gemini API Key Required'}
         footer={
           <div className="flex gap-3">
             <button
@@ -2379,7 +2374,7 @@ function App() {
       >
         <div className="space-y-4">
           <p className="text-sm text-muted">
-            OpenShorts needs both a <strong className="text-ink2">Gemini</strong> API key and an <strong className="text-ink2">Upload-Post</strong> API key. Both have free tiers.
+            <strong className="text-ink2">Gemini</strong> is required to generate clips. The <strong className="text-ink2">Upload-Post</strong> key is only needed to publish them — add it now or skip it and set it later in Settings. Both have free tiers.
           </p>
 
           {/* Gemini block */}

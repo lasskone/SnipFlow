@@ -40,11 +40,20 @@ function saveCache(url, analysis, webResearch, scripts) {
   } catch { /* localStorage full */ }
 }
 
-export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uploadPostKey, uploadUserId, managed = false }) {
+export default function SaaShortsTab({
+  geminiApiKey, elevenLabsKey, falKey, uploadPostKey, uploadUserId, managed = false,
+  // AI provider for the three AI steps: "gemini" (default) or "openrouter" (BYOK).
+  aiProvider = 'gemini', openRouterKey = '', aiModel = '',
+}) {
   // Managed (hosted plan): Gemini (script) + Upload-Post run server-side via the
   // bearer token — no BYOK Gemini key needed. fal.ai + ElevenLabs stay BYOK.
-  const geminiHeader = geminiApiKey ? { 'X-Gemini-Key': geminiApiKey } : {};
-  const needsGeminiKey = !geminiApiKey && !managed;
+  // Both keys are sent when present so switching provider needs no reload; the
+  // backend only reads the one the request actually selects.
+  const aiHeaders = {
+    ...(geminiApiKey ? { 'X-Gemini-Key': geminiApiKey } : {}),
+    ...(openRouterKey ? { 'X-OpenRouter-Key': openRouterKey } : {}),
+  };
+  const needsAiKey = aiProvider === 'openrouter' ? !openRouterKey && !managed : !geminiApiKey && !managed;
   // Wizard state
   const [step, setStep] = useState(() => {
     const cache = loadCache();
@@ -200,8 +209,12 @@ export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uplo
 
   const handleAnalyze = async () => {
     if (!url.trim() && !description.trim()) return;
-    if (needsGeminiKey) {
-      setAnalyzeError('Gemini API key required. Set it in Settings.');
+    if (needsAiKey) {
+      setAnalyzeError(
+        aiProvider === 'openrouter'
+          ? 'OpenRouter API key required. Set it in Settings.'
+          : 'Gemini API key required. Set it in Settings.',
+      );
       return;
     }
 
@@ -213,7 +226,7 @@ export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uplo
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...geminiHeader,
+          ...aiHeaders,
         },
         body: JSON.stringify({
           url: url.trim() || undefined,
@@ -222,6 +235,9 @@ export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uplo
           style,
           language,
           actor_gender: actorGender,
+          llm_provider: aiProvider,
+          // Only meaningful for OpenRouter; the Gemini path ignores it.
+          llm_model: aiProvider === 'openrouter' ? (aiModel || undefined) : undefined,
         }),
       });
 
@@ -528,6 +544,20 @@ export default function SaaShortsTab({ geminiApiKey, elevenLabsKey, falKey, uplo
                   onChange={setNumScripts}
                   size="sm"
                 />
+              </div>
+
+              {/* Which provider runs the research + scripts (set in Settings). */}
+              <div className="flex items-center justify-between gap-2 text-xs text-muted pb-1">
+                <span>
+                  AI provider:{' '}
+                  <span className="text-ink2">
+                    {aiProvider === 'openrouter' ? 'OpenRouter' : 'Gemini'}
+                  </span>
+                  {aiProvider === 'openrouter' && aiModel && (
+                    <span className="text-muted"> · {aiModel}</span>
+                  )}
+                </span>
+                <span>{managed ? 'managed' : 'your own key'}</span>
               </div>
 
               {analyzeError && (

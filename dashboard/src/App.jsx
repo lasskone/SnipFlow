@@ -293,6 +293,18 @@ function App() {
   const [durableClips, setDurableClips] = useState({});
 
   const [apiKey, setApiKey] = useState(localStorage.getItem('gemini_key') || '');
+
+  // OpenRouter: an optional BYOK provider for the AI Shorts steps. The provider
+  // choice and selected model persist alongside the key so a reload keeps the
+  // whole picker state, not just the key.
+  const [aiProvider, setAiProvider] = useState(() => localStorage.getItem('ai_provider') || 'gemini');
+  const [openRouterKey, setOpenRouterKey] = useState(() => {
+    const stored = localStorage.getItem('openRouterKey_v1');
+    if (stored) return decrypt(stored);
+    return '';
+  });
+  const [aiModel, setAiModel] = useState(() => localStorage.getItem('ai_model') || '');
+
   // Social API State - Load encrypted or plain
   const [uploadPostKey, setUploadPostKey] = useState(() => {
     const stored = localStorage.getItem('uploadPostKey_v3');
@@ -731,6 +743,20 @@ function App() {
     // For now keeping gemini plain for compatibility unless requested.
     if (apiKey) localStorage.setItem('gemini_key', apiKey);
   }, [apiKey]);
+
+  useEffect(() => {
+    localStorage.setItem('ai_provider', aiProvider);
+  }, [aiProvider]);
+
+  useEffect(() => {
+    if (openRouterKey) {
+      localStorage.setItem('openRouterKey_v1', encrypt(openRouterKey));
+    }
+  }, [openRouterKey]);
+
+  useEffect(() => {
+    if (aiModel) localStorage.setItem('ai_model', aiModel);
+  }, [aiModel]);
 
   useEffect(() => {
     if (uploadPostKey) {
@@ -1634,7 +1660,16 @@ function App() {
                 </div>
               ) : (
                 <>
-              <KeyInput onKeySet={setApiKey} savedKey={apiKey} />
+              <KeyInput
+                onKeySet={setApiKey}
+                savedKey={apiKey}
+                provider={aiProvider}
+                onProviderChange={setAiProvider}
+                openRouterKey={openRouterKey}
+                onOpenRouterKeySet={setOpenRouterKey}
+                model={aiModel}
+                onModelChange={setAiModel}
+              />
 
               <div className="card p-4 sm:p-6 mt-8">
                 <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
@@ -1810,7 +1845,17 @@ function App() {
 
           {/* View: SaaS Shorts */}
           {activeTab === 'saasshorts' && (
-            <SaaShortsTab geminiApiKey={apiKey} elevenLabsKey={elevenLabsKey} falKey={falKey} uploadPostKey={uploadPostKey} uploadUserId={uploadUserId} managed={isManaged} />
+            <SaaShortsTab
+              geminiApiKey={apiKey}
+              elevenLabsKey={elevenLabsKey}
+              falKey={falKey}
+              uploadPostKey={uploadPostKey}
+              uploadUserId={uploadUserId}
+              managed={isManaged}
+              aiProvider={aiProvider}
+              openRouterKey={openRouterKey}
+              aiModel={aiModel}
+            />
           )}
 
           {/* View: AI Agent */}

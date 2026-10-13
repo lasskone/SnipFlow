@@ -43,22 +43,87 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL_SAAS") or os.environ.get("GEMINI_MOD
 
 
 # ═══════════════════════════════════════════════════════════════════════
+# LLM provider dispatch
+# ═══════════════════════════════════════════════════════════════════════
+# The three AI operations (web research, analysis, script writing) default to
+# Gemini. Passing llm_provider="openrouter" routes the *identical* prompt to
+# OpenRouter instead (see openrouter_backend.py). The Gemini paths below are
+# unchanged: same model, same config, same prompt, same parsing.
+
+
+def _research_openrouter(
+    prompt: str, url: str, domain: str, api_key: Optional[str], model: Optional[str]
+) -> dict:
+    """Web research on OpenRouter (``:online`` search), normalised to the Gemini shape.
+
+    OpenRouter's ``url_citation`` annotations are mapped onto Gemini's
+    ``grounding_sources`` list by ``openrouter_backend.chat_json``.
+    """
+    from openrouter_backend import chat_json, DEFAULT_MODEL
+
+    target = model or DEFAULT_MODEL
+    print(f"[SaaSShorts] 🔍 Researching via OpenRouter ({target}, web search)...")
+    research, sources, _cost = chat_json(
+        prompt, api_key, target, expect="object", web_search=True, temperature=0.3
+    )
+    research["grounding_sources"] = sources
+    research.setdefault("product_name", domain)
+    research.setdefault("website_url", url)
+    print(f"[SaaSShorts] ✅ Web research complete: {len(sources)} sources found")
+    return research
+
+
+def _analyze_openrouter(
+    prompt: str, web_research: Optional[dict], api_key: Optional[str], model: Optional[str]
+) -> dict:
+    """Marketing analysis on OpenRouter, returning the Gemini analysis shape."""
+    from openrouter_backend import chat_json, DEFAULT_MODEL
+
+    target = model or DEFAULT_MODEL
+    print(f"[SaaSShorts] 🧠 Analyzing via OpenRouter ({target})...")
+    analysis, _sources, _cost = chat_json(prompt, api_key, target, expect="object")
+    if web_research and web_research.get("grounding_sources"):
+        analysis["_web_sources"] = web_research["grounding_sources"]
+    print(
+        f"[SaaSShorts] ✅ Analysis: {analysis.get('product_name', '?')} "
+        f"({len(analysis.get('pain_points', []))} pain points)"
+    )
+    return analysis
+
+
+def _scripts_openrouter(prompt: str, api_key: Optional[str], model: Optional[str]) -> list:
+    """UGC script batch on OpenRouter, returning the Gemini scripts shape."""
+    from openrouter_backend import chat_json, DEFAULT_MODEL
+
+    target = model or DEFAULT_MODEL
+    print(f"[SaaSShorts] 📝 Generating scripts via OpenRouter ({target})...")
+    scripts, _sources, _cost = chat_json(
+        prompt, api_key, target, expect="array", max_tokens=8192
+    )
+    print(f"[SaaSShorts] ✅ Generated {len(scripts)} scripts")
+    return scripts
+
+
+# ═══════════════════════════════════════════════════════════════════════
 # Phase 1: Website Scraping, Web Research & Analysis
 # ═══════════════════════════════════════════════════════════════════════
 
-def research_saas_online(url: str, gemini_key: str) -> dict:
+def research_saas_online(
+    url: str,
+    gemini_key: str,
+    *,
+    llm_provider: str = "gemini",
+    llm_model: Optional[str] = None,
+    openrouter_key: Optional[str] = None,
+) -> dict:
     """
     Use Gemini with Google Search grounding to deeply research a SaaS product
     across the internet: reviews, Reddit threads, Twitter, competitor comparisons,
     pricing complaints, user testimonials, etc.
+
+    Pass ``llm_provider="openrouter"`` (with ``openrouter_key`` and ``llm_model``)
+    to run the same research on OpenRouter with ``:online`` web search instead.
     """
-    from google import genai
-    from google.genai import types
-
-    print(f"[SaaSShorts] 🔍 Researching {url} across the web (Google Search grounding)...")
-
-    client = genai.Client(api_key=gemini_key)
-
     # Extract domain name for search queries
     domain = url.replace("https://", "").replace("http://", "").split("/")[0]
 
@@ -101,6 +166,16 @@ Return a comprehensive JSON research report:
 }}
 
 Be thorough. Use REAL data from your search results, not made-up information."""
+
+    if llm_provider == "openrouter":
+        return _research_openrouter(prompt, url, domain, openrouter_key, llm_model)
+
+    from google import genai
+    from google.genai import types
+
+    print(f"[SaaSShorts] 🔍 Researching {url} across the web (Google Search grounding)...")
+
+    client = genai.Client(api_key=gemini_key)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -258,17 +333,22 @@ def scrape_website(url: str) -> dict:
     return result
 
 
-def analyze_saas(scraped_data: dict, gemini_key: str, web_research: dict = None) -> dict:
+def analyze_saas(
+    scraped_data: dict,
+    gemini_key: str,
+    web_research: dict = None,
+    *,
+    llm_provider: str = "gemini",
+    llm_model: Optional[str] = None,
+    openrouter_key: Optional[str] = None,
+) -> dict:
     """
     Deep analysis of a SaaS product combining website scraping + web research.
-    Uses Gemini 3 Flash for synthesis.
+
+    Uses Gemini 3 Flash for synthesis by default; pass ``llm_provider="openrouter"``
+    (with ``openrouter_key`` and ``llm_model``) to analyse on OpenRouter instead.
     """
-    from google import genai
-    from google.genai import types
-
     print(f"[SaaSShorts] 🧠 Analyzing {scraped_data['url']} (with web research)...")
-
-    client = genai.Client(api_key=gemini_key)
 
     # Build web research context
     research_context = ""
@@ -354,6 +434,14 @@ Return a JSON object:
 IMPORTANT: Use REAL pain points from user reviews when available. Real frustrations make the best UGC content.
 Include 5-8 pain points, 4-6 emotional hooks, and 4+ viral angles."""
 
+    if llm_provider == "openrouter":
+        return _analyze_openrouter(prompt, web_research, openrouter_key, llm_model)
+
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=gemini_key)
+
     response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=[prompt],
@@ -394,15 +482,18 @@ def generate_scripts(
     style: str = "ugc",
     language: str = "en",
     actor_gender: str = "female",
+    *,
+    llm_provider: str = "gemini",
+    llm_model: Optional[str] = None,
+    openrouter_key: Optional[str] = None,
 ) -> list:
-    """Generate video scripts based on SaaS analysis."""
-    from google import genai
-    from google.genai import types
+    """Generate video scripts based on SaaS analysis.
 
+    Gemini by default; pass ``llm_provider="openrouter"`` (with ``openrouter_key``
+    and ``llm_model``) to write the scripts on OpenRouter instead.
+    """
     lang_name = "Spanish" if language == "es" else "English"
     print(f"[SaaSShorts] 📝 Generating {num_scripts} scripts ({style}, {lang_name})...")
-
-    client = genai.Client(api_key=gemini_key)
 
     style_guide = {
         "ugc": "Natural, authentic UGC style. Person talking to camera like sharing a discovery with a friend. Casual, genuine.",
@@ -535,6 +626,14 @@ RULES:
 - If female: casual summer look (tank top, camisole, simple tee). If male: casual tee or hoodie.
 - Example female: "a 26 year old attractive european woman, light brown wavy hair, wearing a white tank top, natural minimal makeup, friendly face"
 - Example male: "a 29 year old european man, short dark hair, light stubble, wearing a navy t-shirt, smart casual look" """
+
+    if llm_provider == "openrouter":
+        return _scripts_openrouter(prompt, openrouter_key, llm_model)
+
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=gemini_key)
 
     response = client.models.generate_content(
         model=GEMINI_MODEL,

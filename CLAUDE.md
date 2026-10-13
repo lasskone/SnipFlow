@@ -31,6 +31,7 @@ Ingest (yt-dlp or upload) → transcription (word timestamps) → scene detectio
 - `app.py`: FastAPI server, job queue, REST endpoints, deploy handover/drain.
 - `clip_selection.py`, `layout_picker.py`, `reframe_v2.py`, `split_layout.py`, `screencast_layout.py`, `camera_inset.py`: moment picking and layouts.
 - `editor.py` (Gemini FFmpeg effects), `hooks.py` (hook overlays), `subtitles.py` (SRT/ASS, burning), `translate.py` (ElevenLabs dubbing), `thumbnail.py`.
+- `saasshorts.py` + `openrouter_backend.py`: the AI Shorts pipeline. Its three AI steps (web research, marketing analysis, UGC scripts) run on Gemini by default; passing `llm_provider="openrouter"` (BYOK key, no Google key needed) routes the *identical* prompts to OpenRouter. The Gemini paths must stay byte-identical — provider choice is a dispatch, never a rewrite.
 - `mcp_server.py`, `mcp_stdio.py`: MCP over HTTP and stdio.
 - `cloud/`: auth, API keys, metering, billing, lifecycle emails, account erasure, autopilot, proxy ledger, alerts.
 - `dashboard/src/App.jsx`: main React component. `dashboard/vite-plugin-seo.js` + `dashboard/seo/`: build-time SEO pages, sitemap, llms.txt. `dashboard/seo/data.js`: single source of truth for pricing/pipeline/competitor facts.

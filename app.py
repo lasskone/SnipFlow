@@ -186,6 +186,21 @@ async def resolve_gemini(request: Request) -> Optional[str]:
     return os.environ.get("GEMINI_API_KEY")
 
 
+async def resolve_openrouter(request: Request) -> Optional[str]:
+    """Resolve the OpenRouter API key for a request (strict BYOK).
+
+    OpenRouter is an *optional* alternative provider for the SaaSShorts AI steps
+    and is strictly bring-your-own-key. Unlike Gemini there is no managed server
+    key — the token cost is always the caller's own — so only the key the caller
+    pasted in AI Settings (``X-OpenRouter-Key``) is ever used. There is
+    deliberately *no* env-var fallback: a shared ``OPENROUTER_API_KEY`` would let
+    one self-hoster's key spend another's credits, and would silently turn a
+    caller-paid path into a server-paid one. A missing key resolves to ``None``,
+    and the endpoints then fail with a clear 400 rather than spending anything.
+    """
+    return request.headers.get("X-OpenRouter-Key")
+
+
 async def resolve_upload_post(request: Request, body_key: Optional[str] = None):
     """Resolve the Upload-Post key and the profile to post as.
 
@@ -259,6 +274,18 @@ def gemini_missing_error():
         return payment_required(
             "no_plan", "This action needs an active OpenShorts plan (or the user's own API key).")
     return HTTPException(status_code=400, detail="Missing X-Gemini-Key header")
+
+
+def openrouter_http_error(e) -> HTTPException:
+    """Map an OpenRouter failure to the right HTTP status.
+
+    ``OpenRouterError`` carries a ``kind``; the message is built server-side from
+    the status and a key-scrubbed excerpt, so it is safe to return verbatim — the
+    API key never appears in the response. Auth/not-found/rate-limit are the
+    caller's problem (4xx); parse/transport failures are 502.
+    """
+    code = {"auth": 401, "not_found": 404, "rate_limit": 429}.get(getattr(e, "kind", ""), 502)
+    return HTTPException(status_code=code, detail=str(e))
 
 
 # Probe rate limiter. In-memory, resets on restart by design — the hard monthly
@@ -6550,6 +6577,8 @@ from saasshorts import (
     get_elevenlabs_voices,
     DEFAULT_VOICES,
 )
+import openrouter_backend
+from openrouter_backend import OpenRouterError
 
 # State for SaaSShorts jobs (separate from video processing jobs)
 saas_jobs: Dict[str, Dict] = {}
@@ -6562,6 +6591,8 @@ class SaaSAnalyzeRequest(BaseModel):
     style: str = "ugc"
     language: str = "en"
     actor_gender: str = "female"
+    llm_provider: Optional[str] = "gemini"  # "gemini" (default) | "openrouter" (BYOK)
+    llm_model: Optional[str] = None  # OpenRouter model id; ignored by the Gemini path
 
 
 @app.post("/api/saasshorts/analyze")
@@ -6571,14 +6602,30 @@ async def saasshorts_analyze(
 ):
     """Analyze a URL or manual description and generate video scripts."""
     gemini_key = await resolve_gemini(request)
-    if not gemini_key:
-        raise gemini_missing_error()
+    openrouter_key = await resolve_openrouter(request)
+    provider = (req.llm_provider or "gemini").strip().lower()
+    if provider not in ("gemini", "openrouter"):
+        raise HTTPException(status_code=400, detail=f"Unknown llm_provider: {provider!r}")
+
+    if provider == "openrouter":
+        # BYOK only: there is no managed OpenRouter key, so the token cost is
+        # always the caller's own and nothing managed is consumed (→ not metered).
+        if not openrouter_key:
+            raise HTTPException(status_code=400, detail="Missing OpenRouter API key (X-OpenRouter-Key header)")
+        model = req.llm_model or openrouter_backend.DEFAULT_MODEL
+    else:
+        if not gemini_key:
+            raise gemini_missing_error()
+        model = req.llm_model or None
 
     if not req.url and not req.description:
         raise HTTPException(status_code=400, detail="Provide a URL or a product description")
 
-    # Meter the managed Gemini research/analysis (no-op for self-host).
-    saas_minutes = _cloud_config.MANAGED_ANALYSIS_MINUTES if BILLING_ENABLED else 0
+    # Meter the managed Gemini research/analysis (no-op for self-host and for an
+    # OpenRouter request, which runs on the caller's own key).
+    saas_minutes = 0
+    if provider != "openrouter" and BILLING_ENABLED:
+        saas_minutes = _cloud_config.MANAGED_ANALYSIS_MINUTES
     reservation_id = await reserve_managed_action(request, saas_minutes, "saasshorts", "saasshorts_analyze")
 
     try:
@@ -6590,8 +6637,14 @@ async def saasshorts_analyze(
             if req.url and req.url.strip():
                 # URL provided: full scrape + research pipeline
                 scraped = scrape_website(req.url)
-                web_research = research_saas_online(req.url, gemini_key)
-                analysis = analyze_saas(scraped, gemini_key, web_research=web_research)
+                web_research = research_saas_online(
+                    req.url, gemini_key,
+                    llm_provider=provider, llm_model=model, openrouter_key=openrouter_key,
+                )
+                analysis = analyze_saas(
+                    scraped, gemini_key, web_research=web_research,
+                    llm_provider=provider, llm_model=model, openrouter_key=openrouter_key,
+                )
             else:
                 # Manual description: build analysis from description
                 analysis = {
@@ -6604,7 +6657,10 @@ async def saasshorts_analyze(
                     "tone": "casual and authentic",
                 }
 
-            scripts = generate_scripts(analysis, gemini_key, req.num_scripts, req.style, req.language, req.actor_gender)
+            scripts = generate_scripts(
+                analysis, gemini_key, req.num_scripts, req.style, req.language, req.actor_gender,
+                llm_provider=provider, llm_model=model, openrouter_key=openrouter_key,
+            )
             return {
                 "analysis": analysis,
                 "scripts": scripts,
@@ -6616,10 +6672,28 @@ async def saasshorts_analyze(
             await _metering.commit_reservation(reservation_id)
         return result
 
+    except OpenRouterError as e:
+        if reservation_id:
+            await _metering.release_reservation(reservation_id)
+        raise openrouter_http_error(e)
     except Exception as e:
         if reservation_id:
             await _metering.release_reservation(reservation_id)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/saasshorts/openrouter/models")
+async def saasshorts_openrouter_models(request: Request):
+    """The OpenRouter model picker: curated defaults, enriched by the live list.
+
+    Always returns the curated catalogue (it ships in-repo, so the picker works
+    offline / before the first fetch), plus every live model that advertises
+    ``response_format`` with enough context and output budget for the pipeline.
+    A missing or rejected key is reported with ``live: false`` and an ``error``
+    string rather than a 5xx, so the dropdown can still offer the curated set.
+    """
+    api_key = await resolve_openrouter(request)
+    return openrouter_backend.catalogue(api_key)
 
 
 class SaaSActorRequest(BaseModel):

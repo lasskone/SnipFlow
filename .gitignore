@@ -49,3 +49,7 @@ skills-lock.json
 
 # Instrucciones locales con datos de infra (repo público)
 CLAUDE.local.md
+
+# Local verification log from verify_openrouter_models.py: evidence of a test
+# spend against a personal key, never committed to a public repo.
+openrouter_verification_results.json

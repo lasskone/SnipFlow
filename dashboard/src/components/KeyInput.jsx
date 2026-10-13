@@ -68,11 +68,11 @@ export default function KeyInput({
         setModelsLive(!!data.live);
         setModelsError(data.error || '');
         // Keep a valid *and selectable* model: if the stored model vanished, was
-        // never set, or is no longer end-to-end verified, fall back to the first
-        // verified recommended entry rather than silently keeping an unproven one.
-        const verifiedList = list.filter((m) => m.verified);
-        if (!model || !verifiedList.some((m) => m.id === model)) {
-          const first = verifiedList.find((m) => m.recommended) || verifiedList[0];
+        // never set, or is no longer in the curated set, fall back to the first
+        // curated entry rather than silently keeping something unselectable.
+        const selectableList = list.filter((m) => m.recommended);
+        if (!model || !selectableList.some((m) => m.id === model)) {
+          const first = selectableList[0];
           if (first) onModelChange?.(first.id);
         }
       })
@@ -103,15 +103,19 @@ export default function KeyInput({
   };
 
   const selected = models.find((m) => m.id === model);
-  // Only models proven end-to-end are offered as selectable options. Everything
-  // else stays in the catalogue as *diagnostic* metadata (see the excluded list
-  // below) so an unproven model is never one click away from a real pipeline run.
-  const selectable = models.filter((m) => m.verified);
-  const excluded = models.filter((m) => !m.verified);
-  // Curated candidates are the tracked set worth listing by name; the live-only
-  // long tail is summarised as a count rather than a wall of IDs.
-  const excludedCurated = excluded.filter((m) => m.recommended);
-  const excludedLiveCount = excluded.length - excludedCurated.length;
+  // The curated models are the selectable options. Each one is metadata-qualified
+  // — it advertises JSON output with enough context and output budget for the
+  // three AI steps — which is enough to *run* it on the caller's own OpenRouter
+  // key. It is not proof the model runs the pipeline well: a curated model that
+  // has not been end-to-end tested stays selectable but is labelled "Not
+  // end-to-end tested" in the dropdown and below. The `verified` flag is never
+  // implied by membership — it is set only by recorded end-to-end evidence — so
+  // an untested model is never shown as verified.
+  const selectable = models.filter((m) => m.recommended);
+  const excluded = models.filter((m) => !m.recommended);
+  // The live-only long tail is not curated, so it stays as diagnostic metadata:
+  // summarised as a count rather than a wall of IDs.
+  const excludedLiveCount = excluded.length;
 
   return (
     <div className="card p-4 sm:p-6 mb-8 animate-fade">
@@ -240,8 +244,8 @@ export default function KeyInput({
               </p>
             ) : selectable.length === 0 ? (
               <p className="text-xs text-muted">
-                No end-to-end verified models yet — none are selectable until the
-                pipeline is run against them (see the candidates below).
+                No curated models available — the catalogue ships in-repo, so this
+                should not happen; re-paste your OpenRouter key to reload it.
               </p>
             ) : (
               <div className="relative">
@@ -254,6 +258,7 @@ export default function KeyInput({
                     <option key={m.id} value={m.id}>
                       {m.name} — {m.id}
                       {m.free ? ' (free)' : ''}
+                      {m.verified ? '' : ' · Not end-to-end tested'}
                     </option>
                   ))}
                 </select>
@@ -264,33 +269,11 @@ export default function KeyInput({
               </div>
             )}
             {excluded.length > 0 && (
-              <div className="mt-2.5">
-                <p className="text-xs text-muted">
-                  Not selectable ({excluded.length}) — metadata only, not proven
-                  end-to-end:
-                </p>
-                <ul className="mt-1 space-y-0.5">
-                  {excludedCurated.map((m) => (
-                    <li
-                      key={m.id}
-                      className="text-xs text-muted flex items-center gap-1.5"
-                    >
-                      <span className="font-mono">{m.id}</span>
-                      {m.free ? (
-                        <span className="badge-ok">Free</span>
-                      ) : (
-                        <span className="badge-brass">Paid</span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                {excludedLiveCount > 0 && (
-                  <p className="mt-1 text-xs text-muted">
-                    …and {excludedLiveCount} other qualifying live model
-                    {excludedLiveCount === 1 ? '' : 's'}.
-                  </p>
-                )}
-              </div>
+              <p className="mt-2.5 text-xs text-muted">
+                …and {excludedLiveCount} other qualifying OpenRouter model
+                {excludedLiveCount === 1 ? '' : 's'} — metadata only, not curated
+                and not end-to-end tested.
+              </p>
             )}
             {selected && (
               <div className="mt-2.5 flex flex-wrap items-center gap-2 text-xs">
@@ -303,9 +286,7 @@ export default function KeyInput({
                 {selected.verified ? (
                   <span className="badge-ok">Verified end-to-end</span>
                 ) : (
-                  <span className="text-muted">
-                    metadata only · not end-to-end verified
-                  </span>
+                  <span className="badge-warn">Not end-to-end tested</span>
                 )}
                 {perMillion(selected.prompt_price) && (
                   <span className="text-muted">

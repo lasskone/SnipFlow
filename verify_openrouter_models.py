@@ -243,9 +243,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     print("\nPaste into openrouter_backend.py to record the evidence:")
     rendered = ", ".join(sorted(passed))
     print(f"VERIFIED_MODELS: Set[str] = {{{rendered}}}")
-    print("\nThe picker reports `verified` from this set; models absent from it are")
-    print("excluded from the selectable dropdown and shown as metadata-only")
-    print("diagnostics, never as proven-compatible options.")
+    print("\nThe picker reports `verified` from this set. Curated models stay")
+    print("selectable without it — they are metadata-qualified — but are labelled")
+    print("\"Not end-to-end tested\", never \"verified\"; only this set grants that.")
     return 0 if not failed else 1
 
 

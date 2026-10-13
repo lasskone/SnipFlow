@@ -95,9 +95,10 @@ class TestStrictByok:
         assert response.status_code == 200
         body = response.json()
         assert body["live"] is False
-        # The endpoint still returns every curated model so the picker can list
-        # them as diagnostic metadata; the *selectable* set is the verified
-        # subset, gated in the UI on each entry's ``verified`` flag (#2.2).
+        # The endpoint still returns every curated model so the picker can offer
+        # them for selection; the curated set is metadata-qualified, so it is
+        # selectable even without recorded end-to-end evidence — the UI labels
+        # each such model "Not end-to-end tested" rather than verified (#2.3).
         assert len(body["models"]) == 9
         # The flag the UI partitions on is always present and, with no evidence
         # recorded, honest: nothing is claimed proven it cannot prove.
